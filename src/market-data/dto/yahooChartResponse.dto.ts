@@ -5,6 +5,7 @@ export interface YahooChartResponse {
       timestamp: number[];
       indicators: {
         quote: Array<{
+          timestamp: number[];
           open: number[];
           close: number[];
           high: number[];

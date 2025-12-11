@@ -36,12 +36,19 @@ export class MarketDataService {
       });
 
       const data = response.body;
+      const graph = data.chart.result[0].indicators.quote[0];
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const regularMarketPrice = data.chart.result[0].meta.regularMarketPrice;
+      const timestamp_series = data.chart.result[0].timestamp;
+      graph.timestamp = timestamp_series;
 
       return {
         success: true,
         symbol,
-
-        data,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        regularMarketPrice,
+        graph,
       };
     } catch (err: unknown) {
       const error = err as Error;
