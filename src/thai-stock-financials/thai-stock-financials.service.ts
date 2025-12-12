@@ -1,18 +1,17 @@
+// set-highlight-scraper.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import puppeteer, { Browser, Page } from 'puppeteer';
 import { ThaiStockFinancialsResponseDto } from './dto/ThaiStockFinancialsResponse.dto';
 import { FinancialPeriodDto } from './dto/FinancialPeriod.dto';
 import { FinancialRowDto } from './dto/FinancialRow.dto';
-import { FinancialValueDto } from './dto/FinancialValue.dto';
-import { FinancialSectionDto } from './dto/FinancialSection.dto';
 
 @Injectable()
 export class SetHighlightScraperService {
   private readonly logger = new Logger(SetHighlightScraperService.name);
-
   private browser: Browser | null = null;
 
-  private async getBrowser() {
+  // ================= Browser =================
+  private async getBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         headless: true,
@@ -22,7 +21,8 @@ export class SetHighlightScraperService {
     return this.browser;
   }
 
-  async scrapeBtsHighlights(symbol: string): Promise<ThaiStockFinancialsResponseDto> {
+  // ================= Public API =================
+  async scrapeHighlights(symbol: string): Promise<ThaiStockFinancialsResponseDto> {
     const url = `https://www.set.or.th/th/market/product/stock/quote/${symbol}/financial-statement/company-highlights`;
 
     const browser = await this.getBrowser();
@@ -31,7 +31,7 @@ export class SetHighlightScraperService {
     try {
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
-      // block resource ให้เบาสุด
+      // เบาสุด
       await page.setRequestInterception(true);
       page.on('request', (req) => {
         const block = ['image', 'stylesheet', 'font', 'media'];
@@ -39,51 +39,71 @@ export class SetHighlightScraperService {
         else req.continue();
       });
 
-      // ❗ ไม่รออะไรทั้งนั้น
+      // ❗ ไม่ wait อะไรเลย
       await page.goto(url, { timeout: 0 });
 
-      // ✅ poll หา table จริง
-      const rawTable = await this.pollFinancialTable(page);
+      // poll หา table
+      const { financialTable, marketTable } = await this.pollTables(page);
 
-      return this.mapRawTableToDto(symbol, rawTable);
+      return this.mapTablesToDto(symbol, financialTable, marketTable);
     } finally {
       await page.close();
     }
   }
 
-  private async pollFinancialTable(page: Page): Promise<string[][]> {
-    const MAX_TRY = 15;
+  // ================= Poll tables =================
+  private async pollTables(page: Page): Promise<{
+    financialTable: string[][];
+    marketTable: string[][];
+  }> {
+    const MAX_TRY = 20;
 
     for (let i = 0; i < MAX_TRY; i++) {
-      const table = await page.evaluate(() => {
+      const result = await page.evaluate(() => {
+        const extract = (tbl?: Element | null) =>
+          tbl
+            ? Array.from(tbl.querySelectorAll('tr')).map((tr) =>
+                Array.from(tr.querySelectorAll('th,td')).map((td) =>
+                  (td.textContent || '').replace(/\s+/g, ' ').trim(),
+                ),
+              )
+            : [];
+
         const tables = Array.from(document.querySelectorAll('table'));
 
-        const target = tables.find((t) => t.innerText.includes('งวดงบการเงิน') && t.innerText.includes('สินทรัพย์รวม'));
-
-        if (!target) return null;
-
-        return Array.from(target.querySelectorAll('tr')).map((tr) =>
-          Array.from(tr.querySelectorAll('th,td')).map((td) => (td.textContent || '').replace(/\s+/g, ' ').trim()),
+        const financial = tables.find(
+          (t) => t.innerText.includes('งวดงบการเงิน') && t.innerText.includes('สินทรัพย์รวม'),
         );
+
+        const market = tables.find((t) => t.innerText.includes('ค่าสถิติสำคัญ') || t.innerText.includes('P/E (เท่า)'));
+
+        return {
+          financialTable: extract(financial),
+          marketTable: extract(market),
+        };
       });
 
-      if (table && table.length > 0) {
-        this.logger.debug(`SET table found after ${i + 1} tries`);
-        return table;
+      if (result.financialTable.length && result.marketTable.length) {
+        this.logger.debug(`SET tables found after ${i + 1} tries`);
+        return result;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       await this.sleep(1000);
     }
 
-    throw new Error('SET financial table not found after polling');
-  }
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    throw new Error('SET tables not found');
   }
 
-  mapRawTableToDto(symbol: string, rawTable: string[][]): ThaiStockFinancialsResponseDto {
-    // ---------- helpers ----------
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // ================= Mapper =================
+  private mapTablesToDto(
+    symbol: string,
+    financialTable: string[][],
+    marketTable: string[][],
+  ): ThaiStockFinancialsResponseDto {
     const parseNumber = (s: string): number | null => {
       if (!s || s === '-' || s === '—') return null;
       const n = Number(s.replace(/,/g, ''));
@@ -93,116 +113,100 @@ export class SetHighlightScraperService {
     const normalizePeriod = (s: string): FinancialPeriodDto => {
       const clean = s.replace(/\s+/g, ' ').trim();
 
-      // --- งบ x เดือน ---
-      const monthMatch = clean.match(/(\d+)\s*เดือน.*?(25\d{2})/);
-      if (monthMatch) {
-        const months = monthMatch[1]; // 3 / 6 / 9
-        const year = monthMatch[2]; // 2568
+      const month = clean.match(/(\d+)\s*เดือน.*?(25\d{2})/);
+      if (month) {
         return {
-          key: `${months}M${year}`,
-          label: `งบ ${months} เดือน ${year}`,
+          key: `${month[1]}M${month[2]}`,
+          label: `งบ ${month[1]} เดือน ${month[2]}`,
         };
       }
 
-      // --- งบปี ---
-      const yearMatch = clean.match(/25\d{2}/);
-      if (yearMatch) {
-        const year = yearMatch[0];
+      const year = clean.match(/25\d{2}/);
+      if (year) {
         return {
-          key: `FY${year}`,
-          label: `งบปี ${year}`,
+          key: `FY${year[0]}`,
+          label: `งบปี ${year[0]}`,
         };
       }
 
-      // fallback
-      return {
-        key: clean,
-        label: clean,
-      };
+      return { key: clean, label: clean };
     };
 
-    // ---------- periods ----------
-    const headerRow = rawTable[0];
-    const periods: FinancialPeriodDto[] = headerRow.slice(1).map(normalizePeriod);
+    // ---------- Financial ----------
+    const periods = financialTable[0].slice(1).map(normalizePeriod);
 
-    // ---------- row key map ----------
-    const ROW_KEY_MAP: Record<string, string> = {
+    const FIN_MAP: Record<string, string> = {
       สินทรัพย์รวม: 'totalAssets',
       หนี้สินรวม: 'totalLiabilities',
       ส่วนของผู้ถือหุ้น: 'equity',
-      มูลค่าหุ้นที่เรียกชำระแล้ว: 'paidUpCapital',
+      มูลค่าหุ้นที่เรียกชำระแล้ว: 'Profit (Loss) from Other Activities',
       รายได้รวม: 'totalRevenue',
-      'กำไร (ขาดทุน) จากกิจกรรมอื่น': 'otherProfitLoss',
       กำไรสุทธิ: 'netProfit',
       'กำไรต่อหุ้น (บาท)': 'eps',
-      'ROA (%)': 'roa',
-      'ROE (%)': 'roe',
-      'อัตรากำไรสุทธิ (%)': 'netMargin',
     };
 
-    // ---------- section buckets ----------
-    const balanceSheetRows: FinancialRowDto[] = [];
-    const ratioRows: FinancialRowDto[] = [];
+    const financialRows: FinancialRowDto[] = [];
 
-    let currentSection: 'balance' | 'ratio' | null = null;
+    for (let i = 1; i < financialTable.length; i++) {
+      const label = financialTable[i][0];
+      const rowKey = FIN_MAP[label];
+      if (!rowKey) continue;
 
-    // ---------- iterate rows ----------
-    for (let i = 1; i < rawTable.length; i++) {
-      const row = rawTable[i];
-      const label = row[0]?.trim();
-
-      if (!label) continue;
-
-      if (label.includes('บัญชีทางการเงิน')) {
-        currentSection = 'balance';
-        continue;
-      }
-
-      if (label.includes('อัตราส่วนทางการเงิน')) {
-        currentSection = 'ratio';
-        continue;
-      }
-
-      const rowKey = ROW_KEY_MAP[label];
-      if (!rowKey || !currentSection) continue;
-
-      const values: FinancialValueDto[] = periods.map((p, idx) => ({
-        periodKey: p.key,
-        value: parseNumber(row[idx + 1]),
-      }));
-
-      const rowDto: FinancialRowDto = {
+      financialRows.push({
         rowKey,
         label,
-        values,
-      };
-
-      if (currentSection === 'balance') {
-        balanceSheetRows.push(rowDto);
-      } else {
-        ratioRows.push(rowDto);
-      }
+        values: periods.map((p, idx) => ({
+          periodKey: p.key,
+          value: parseNumber(financialTable[i][idx + 1]),
+        })),
+      });
     }
 
-    // ---------- sections ----------
-    const sections: FinancialSectionDto[] = [
-      {
-        sectionKey: 'key_financials',
-        sectionLabel: 'บัญชีทางการเงินที่สำคัญ',
-        rows: balanceSheetRows,
-      },
-      {
-        sectionKey: 'financial_ratios',
-        sectionLabel: 'อัตราส่วนทางการเงินที่สำคัญ',
-        rows: ratioRows,
-      },
-    ];
+    // ---------- Market ----------
+    const marketPeriods = marketTable[0].slice(1).map(normalizePeriod);
+
+    const MARKET_MAP: Record<string, string> = {
+      'ราคาล่าสุด (บาท)': 'lastPrice',
+      'มูลค่าหลักทรัพย์ตามราคาตลาด (ล้านบาท)': 'marketCap',
+      'P/E (เท่า)': 'pe',
+      'P/BV (เท่า)': 'pbv',
+      'มูลค่าหุ้นทางบัญชีต่อหุ้น (บาท)': 'bvps',
+      'อัตราส่วนเงินปันผลตอบแทน (%)': 'dividendYield',
+    };
+
+    const marketRows: FinancialRowDto[] = [];
+
+    for (let i = 1; i < marketTable.length; i++) {
+      const label = marketTable[i][0];
+      const rowKey = MARKET_MAP[label];
+      if (!rowKey) continue;
+
+      marketRows.push({
+        rowKey,
+        label,
+        values: marketPeriods.map((p, idx) => ({
+          periodKey: p.key,
+          value: parseNumber(marketTable[i][idx + 1]),
+        })),
+      });
+    }
 
     return {
       symbol,
       unit: 'ล้านบาท',
       periods,
-      sections,
+      sections: [
+        {
+          sectionKey: 'key_financials',
+          sectionLabel: 'บัญชีทางการเงินที่สำคัญ',
+          rows: financialRows,
+        },
+        {
+          sectionKey: 'market_statistics',
+          sectionLabel: 'ค่าสถิติสำคัญ ณ วันที่',
+          rows: marketRows,
+        },
+      ],
     };
   }
 }

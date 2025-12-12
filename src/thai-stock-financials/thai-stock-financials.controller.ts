@@ -11,6 +11,6 @@ export class ThaiStockFinancialsController {
     @Param('symbol') symbol: string,
     // @Query('lang') lang: 'th' | 'en' = 'th',
   ): Promise<ThaiStockFinancialsResponseDto> {
-    return this.svc.scrapeBtsHighlights(symbol);
+    return this.svc.scrapeHighlights(symbol);
   }
 }
