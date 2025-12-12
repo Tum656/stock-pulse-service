@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import puppeteer from 'puppeteer';
+import puppeteer, { Browser, Page } from 'puppeteer';
 import { ThaiStockFinancialsResponseDto } from './dto/ThaiStockFinancialsResponse.dto';
 import { FinancialPeriodDto } from './dto/FinancialPeriod.dto';
 import { FinancialRowDto } from './dto/FinancialRow.dto';
@@ -10,48 +10,76 @@ import { FinancialSectionDto } from './dto/FinancialSection.dto';
 export class SetHighlightScraperService {
   private readonly logger = new Logger(SetHighlightScraperService.name);
 
-  async scrapeBtsHighlights(symbol: string) {
+  private browser: Browser | null = null;
+
+  private async getBrowser() {
+    if (!this.browser) {
+      this.browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    }
+    return this.browser;
+  }
+
+  async scrapeBtsHighlights(symbol: string): Promise<ThaiStockFinancialsResponseDto> {
     const url = `https://www.set.or.th/th/market/product/stock/quote/${symbol}/financial-statement/company-highlights`;
 
-    const browser = await puppeteer.launch({
-      headless: true, // ✅ แก้ตรงนี้
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    const browser = await this.getBrowser();
+    const page = await browser.newPage();
 
     try {
-      const page = await browser.newPage();
-
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36');
 
-      await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 60000,
+      // block resource ให้เบาสุด
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const block = ['image', 'stylesheet', 'font', 'media'];
+        if (block.includes(req.resourceType())) req.abort();
+        else req.continue();
       });
 
-      await page.waitForSelector('table', { timeout: 30000 });
+      // ❗ ไม่รออะไรทั้งนั้น
+      await page.goto(url, { timeout: 0 });
 
+      // ✅ poll หา table จริง
+      const rawTable = await this.pollFinancialTable(page);
+
+      return this.mapRawTableToDto(symbol, rawTable);
+    } finally {
+      await page.close();
+    }
+  }
+
+  private async pollFinancialTable(page: Page): Promise<string[][]> {
+    const MAX_TRY = 15;
+
+    for (let i = 0; i < MAX_TRY; i++) {
       const table = await page.evaluate(() => {
         const tables = Array.from(document.querySelectorAll('table'));
-        const target = tables.find(
-          (t) =>
-            t.innerText.includes('สินทรัพย์รวม') &&
-            t.innerText.includes('หนี้สินรวม') &&
-            t.innerText.includes('กำไรสุทธิ'),
-        );
 
-        if (!target) {
-          throw new Error('Key Financials table not found');
-        }
+        const target = tables.find((t) => t.innerText.includes('งวดงบการเงิน') && t.innerText.includes('สินทรัพย์รวม'));
+
+        if (!target) return null;
 
         return Array.from(target.querySelectorAll('tr')).map((tr) =>
-          Array.from(tr.querySelectorAll('th,td')).map((td) => td.textContent?.trim() ?? ''),
+          Array.from(tr.querySelectorAll('th,td')).map((td) => (td.textContent || '').replace(/\s+/g, ' ').trim()),
         );
       });
 
-      return this.mapRawTableToDto(symbol, table);
-    } finally {
-      await browser.close();
+      if (table && table.length > 0) {
+        this.logger.debug(`SET table found after ${i + 1} tries`);
+        return table;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      await this.sleep(1000);
     }
+
+    throw new Error('SET financial table not found after polling');
+  }
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   mapRawTableToDto(symbol: string, rawTable: string[][]): ThaiStockFinancialsResponseDto {
@@ -65,17 +93,32 @@ export class SetHighlightScraperService {
     const normalizePeriod = (s: string): FinancialPeriodDto => {
       const clean = s.replace(/\s+/g, ' ').trim();
 
-      if (clean.includes('9 เดือน')) {
-        const y = clean.match(/25\d{2}/)?.[0];
-        return { key: `9M${y}`, label: `งบ 9 เดือน ${y}` };
+      // --- งบ x เดือน ---
+      const monthMatch = clean.match(/(\d+)\s*เดือน.*?(25\d{2})/);
+      if (monthMatch) {
+        const months = monthMatch[1]; // 3 / 6 / 9
+        const year = monthMatch[2]; // 2568
+        return {
+          key: `${months}M${year}`,
+          label: `งบ ${months} เดือน ${year}`,
+        };
       }
 
-      if (clean.includes('งบปี')) {
-        const y = clean.match(/25\d{2}/)?.[0];
-        return { key: y!, label: `งบปี ${y}` };
+      // --- งบปี ---
+      const yearMatch = clean.match(/25\d{2}/);
+      if (yearMatch) {
+        const year = yearMatch[0];
+        return {
+          key: `FY${year}`,
+          label: `งบปี ${year}`,
+        };
       }
 
-      return { key: clean, label: clean };
+      // fallback
+      return {
+        key: clean,
+        label: clean,
+      };
     };
 
     // ---------- periods ----------
