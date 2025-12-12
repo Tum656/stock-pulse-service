@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ThaiStockFinancialsResponse",
+  "type": "object",
+  "required": ["symbol", "unit", "periods", "sections"],
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "example": "BTS.BK"
+    },
+    "unit": {
+      "type": "string",
+      "example": "ล้านบาท"
+    },
+    "periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "label"],
+        "properties": {
+          "key": { "type": "string", "example": "2568" },
+          "label": { "type": "string", "example": "งบปี 2568" }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sectionKey", "sectionLabel", "rows"],
+        "properties": {
+          "sectionKey": { "type": "string" },
+          "sectionLabel": { "type": "string" },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["rowKey", "label", "values"],
+              "properties": {
+                "rowKey": { "type": "string" },
+                "label": { "type": "string" },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["periodKey", "value"],
+                    "properties": {
+                      "periodKey": { "type": "string" },
+                      "value": {
+                        "type": ["number", "null"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
