@@ -3,9 +3,15 @@ import { SetHighlightScraperService } from './thai-stock-financials.service';
 import { ThaiStockFinancialsController } from './thai-stock-financials.controller';
 import { SetRightsBenefitsService } from './set-rights-benefits.service';
 import { SetMajorShareholdersService } from './set-major-shareholders.service';
+import { SetCompanyProfileService } from './set-company-profile.service';
 
 @Module({
   controllers: [ThaiStockFinancialsController],
-  providers: [SetHighlightScraperService, SetRightsBenefitsService,SetMajorShareholdersService],
+  providers: [
+    SetHighlightScraperService,
+    SetRightsBenefitsService,
+    SetMajorShareholdersService,
+    SetCompanyProfileService,
+  ],
 })
 export class ThaiStockFinancialsModule {}

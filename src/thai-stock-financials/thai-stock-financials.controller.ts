@@ -5,6 +5,8 @@ import { SetRightsBenefitsService } from './set-rights-benefits.service';
 import { RightsBenefitsResponseDto } from './dto/rights-benefits/RightsBenefitsResponse.dto';
 import { MajorShareholdersResponseDto } from './dto/major-shareholders/MajorShareholdersResponse.dto';
 import { SetMajorShareholdersService } from './set-major-shareholders.service';
+import { CompanyProfileResponseDto } from './dto/company-profileInfo/companyProfileResponse.dto';
+import { SetCompanyProfileService } from './set-company-profile.service';
 
 @Controller('thai-stock-financials')
 export class ThaiStockFinancialsController {
@@ -12,6 +14,7 @@ export class ThaiStockFinancialsController {
     private readonly financialsService: SetHighlightScraperService,
     private readonly rightsBenefitsService: SetRightsBenefitsService,
     private readonly setMajorShareholdersService: SetMajorShareholdersService,
+    private readonly setCompanyProfileService: SetCompanyProfileService,
   ) {}
   @Get(':symbol/key-financials')
   getKeyFinancials(
@@ -37,5 +40,14 @@ export class ThaiStockFinancialsController {
   ): Promise<MajorShareholdersResponseDto> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
     return this.setMajorShareholdersService.scrape(symbol);
+  }
+
+  @Get('/company-profileInfo/:symbol')
+  getCompanyProfileInfo(
+    @Param('symbol') symbol: string,
+    // @Query('lang') lang: 'th' | 'en' = 'th',
+  ): Promise<CompanyProfileResponseDto> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
+    return this.setCompanyProfileService.scrapeCompanyProfile(symbol);
   }
 }
