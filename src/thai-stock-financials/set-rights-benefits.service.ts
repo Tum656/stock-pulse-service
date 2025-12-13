@@ -63,6 +63,7 @@ export class SetRightsBenefitsService implements OnModuleDestroy {
   // CORE EXTRACTOR (ตรง HTML ที่คุณให้)
   // ======================================================
   private async extractItems(page: Page): Promise<RightBenefitItemDto[]> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return page.evaluate(() => {
       const norm = (s: string) =>
         (s || '')
@@ -114,27 +115,37 @@ export class SetRightsBenefitsService implements OnModuleDestroy {
           rawPairs.push({ label, value });
 
           const k = label.replace(/\s+/g, '');
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           if (k === 'วันปิดสมุดทะเบียน') details.bookCloseDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k === 'วันกำหนดรายชื่อผู้ถือหุ้น') details.recordDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k.startsWith('วันจ่าย')) details.paymentDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k === 'ประเภท') details.benefitTypeText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k.includes('บาท/หุ้น')) details.dividendPerShareText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k.includes('รอบผล')) details.periodText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
           else if (k.includes('เงินปันผลจาก')) details.dividendFromText = value;
         }
 
         results.push({
           eventDateText: dateMatch?.[1] ?? '',
           sign,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
           benefitTypeText: details.benefitTypeText ?? '',
           amountText: amountMatch ? `${amountMatch[1]} บาท` : '',
           amountValue: amountMatch ? Number(amountMatch[1]) : null,
           currency: 'THB',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           details,
           rawPairs,
         });
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return results;
     });
   }
