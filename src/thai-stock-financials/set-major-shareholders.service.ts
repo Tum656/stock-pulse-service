@@ -27,13 +27,13 @@ export class SetMajorShareholdersService implements OnModuleDestroy {
     const url = `https://www.set.or.th/th/market/product/stock/quote/${symbol}/major-shareholders`;
 
     await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
     );
 
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 60000,
-    });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // ✅ รอจน table หลักปรากฏจริง
+    await page.waitForSelector('.table-custom-field-main .table-custom-field--cnc tbody tr', { timeout: 30000 });
 
     const items = await page.evaluate(() => {
       const norm = (s: string) =>
@@ -44,9 +44,13 @@ export class SetMajorShareholdersService implements OnModuleDestroy {
 
       const toNumber = (s: string) => (s ? Number(s.replace(/,/g, '')) : null);
 
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
+      const table = document.querySelector('.table-custom-field-main .table-custom-field--cnc');
 
-      return rows.map((tr) => {
+      if (!table) return [];
+
+      const rows = table.querySelectorAll('tbody tr');
+
+      return Array.from(rows).map((tr) => {
         const tds = Array.from(tr.querySelectorAll('td')).map((td) => norm(td.textContent || ''));
 
         return {
@@ -72,33 +76,4 @@ export class SetMajorShareholdersService implements OnModuleDestroy {
       items,
     };
   }
-
-  // private async extractTable(page: Page): Promise<MajorShareholderItemDto[]> {
-  //   return page.evaluate(() => {
-  //     const norm = (s: string) =>
-  //       (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-  //
-  //     const toNumber = (s: string) =>
-  //       s ? Number(s.replace(/,/g, '')) : null;
-  //
-  //     const rows = Array.from(document.querySelectorAll('table tbody tr'));
-  //
-  //     const results: any[] = [];
-  //
-  //     for (const tr of rows) {
-  //       const tds = Array.from(tr.querySelectorAll('td')).map(td => norm(td.textContent || ''));
-  //
-  //       if (tds.length < 4) continue;
-  //
-  //       results.push({
-  //         rank: Number(tds[0]),
-  //         name: tds[1],
-  //         shares: toNumber(tds[2]),
-  //         percent: toNumber(tds[3]),
-  //       });
-  //     }
-  //
-  //     return results;
-  //   });
-  // }
 }
