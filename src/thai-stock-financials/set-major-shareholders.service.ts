@@ -47,10 +47,7 @@ export class SetMajorShareholdersService implements OnModuleDestroy {
       });
 
       // รอเฉพาะ table จริง (เร็วและชัวร์)
-      await page.waitForSelector(
-        '.table-custom-field-main .table-custom-field--cnc tbody tr',
-        { timeout: 30000 },
-      );
+      await page.waitForSelector('.table-custom-field-main .table-custom-field--cnc tbody tr', { timeout: 30000 });
 
       const items = await this.extractItems(page);
 
@@ -95,24 +92,23 @@ export class SetMajorShareholdersService implements OnModuleDestroy {
   private async extractItems(page: Page): Promise<MajorShareholderItem[]> {
     return page.evaluate(() => {
       const norm = (s = '') =>
-        s.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        s
+          .replace(/\u00a0/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
 
       const toNumber = (s: string) => {
         const v = s.replace(/,/g, '');
         return v ? Number(v) : null;
       };
 
-      const table = document.querySelector<HTMLTableElement>(
-        '.table-custom-field-main .table-custom-field--cnc',
-      );
+      const table = document.querySelector<HTMLTableElement>('.table-custom-field-main .table-custom-field--cnc');
       if (!table) return [];
 
       const rows = Array.from(table.querySelectorAll('tbody tr'));
 
       return rows.map((tr) => {
-        const cells = Array.from(tr.querySelectorAll('td')).map((td) =>
-          norm(td.textContent || ''),
-        );
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => norm(td.textContent || ''));
 
         return {
           rank: Number(cells[0]),
