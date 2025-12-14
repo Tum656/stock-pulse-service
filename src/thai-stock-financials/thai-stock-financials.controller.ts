@@ -7,6 +7,9 @@ import { MajorShareholdersResponseDto } from './dto/major-shareholders/MajorShar
 import { SetMajorShareholdersService } from './set-major-shareholders.service';
 import { CompanyProfileResponseDto } from './dto/company-profileInfo/companyProfileResponse.dto';
 import { SetCompanyProfileService } from './set-company-profile.service';
+import { SetCompanyHighlightsService } from './set-company-highlights.service';
+import { SetCompanyHighlightsResponseDto } from './dto/company-highlights/CompanyHighlightsResponse.dto';
+
 
 @Controller('thai-stock-financials')
 export class ThaiStockFinancialsController {
@@ -15,13 +18,14 @@ export class ThaiStockFinancialsController {
     private readonly rightsBenefitsService: SetRightsBenefitsService,
     private readonly setMajorShareholdersService: SetMajorShareholdersService,
     private readonly setCompanyProfileService: SetCompanyProfileService,
+    private readonly setCompanyHighlightsService: SetCompanyHighlightsService,
   ) {}
   @Get(':symbol/key-financials')
   getKeyFinancials(
     @Param('symbol') symbol: string,
     // @Query('lang') lang: 'th' | 'en' = 'th',
-  ): Promise<ThaiStockFinancialsResponseDto> {
-    return this.financialsService.scrapeHighlights(symbol);
+  ): Promise<SetCompanyHighlightsResponseDto> {
+    return this.setCompanyHighlightsService.scrape(symbol);
   }
 
   @Get('/rights-benefits/:symbol')
