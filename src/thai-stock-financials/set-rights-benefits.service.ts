@@ -1,10 +1,19 @@
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import puppeteer, { Browser, Page } from 'puppeteer';
+
+import { RightsBenefitsResponseDto } from './dto/rights-benefits/RightsBenefitsResponse.dto';
+import { RightBenefitItemDto } from './dto/rights-benefits/RightBenefitItem.dto';
+
 @Injectable()
 export class SetRightsBenefitsService implements OnModuleDestroy {
   private readonly logger = new Logger(SetRightsBenefitsService.name);
   private browser: Browser | null = null;
 
   async onModuleDestroy() {
-    if (this.browser) await this.browser.close().catch(() => undefined);
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
+    }
   }
 
   private async getBrowser(): Promise<Browser> {
@@ -21,117 +30,122 @@ export class SetRightsBenefitsService implements OnModuleDestroy {
   // ENTRY
   // ======================================================
   async scrape(symbol: string): Promise<RightsBenefitsResponseDto> {
+    const browser = await this.getBrowser();
+    const page = await browser.newPage();
+
     const url = `https://www.set.or.th/th/market/product/stock/quote/${symbol}/rights-benefits`;
-    const page = await (await this.getBrowser()).newPage();
 
-    try {
-      await this.preparePage(page);
-
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-
-      // 👉 short sleep เพื่อให้ accordion hydrate (จำเป็นจริง)
-      await new Promise((r) => setTimeout(r, 2500));
-
-      const items = await this.extractItems(page);
-
-      return {
-        symbol: symbol.toUpperCase(),
-        sourceUrl: url,
-        asOf: new Date().toISOString(),
-        items,
-      };
-    } catch (e) {
-      this.logger.error(`scrape rights-benefits failed: ${symbol}`, e as Error);
-      throw e;
-    } finally {
-      await page.close().catch(() => undefined);
-    }
-  }
-
-  // ======================================================
-  // PAGE PREP
-  // ======================================================
-  private async preparePage(page: Page): Promise<void> {
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     );
 
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const t = req.resourceType();
-      if (t === 'image' || t === 'font' || t === 'media') req.abort();
-      else req.continue();
+    await page.goto(url, {
+      waitUntil: 'networkidle2',
+      timeout: 60000,
     });
+
+    // 🔥 sleep แบบ native (ไม่มี TS error)
+    await new Promise((r) => setTimeout(r, 4000));
+
+    const items = await this.extractItems(page);
+
+    await page.close();
+
+    return {
+      symbol: symbol.toUpperCase(),
+      sourceUrl: url,
+      asOf: new Date().toISOString(),
+      items,
+    };
   }
 
   // ======================================================
-  // CORE EXTRACTOR
+  // CORE EXTRACTOR (ตรง HTML ที่คุณให้)
   // ======================================================
   private async extractItems(page: Page): Promise<RightBenefitItemDto[]> {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return page.evaluate(() => {
-      const norm = (s = '') =>
-        s.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+      const norm = (s: string) =>
+        (s || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
 
-      const parseHeader = (text: string) => {
-        return {
-          sign: text.match(/\b(XD|XR|XW|XB|XM)\b/)?.[1] ?? null,
-          date: text.match(/(\d{1,2}\s*[ก-ฮ]\S*\s*25\d{2})/)?.[1] ?? '',
-          amount: text.match(/(\d+(?:\.\d+)?)\s*บาท/)?.[1],
-        };
-      };
+      const results: any[] = [];
 
-      const mapDetails = (rows: Element[]) => {
-        const details: Record<string, string> = {};
-        const rawPairs: { label: string; value: string }[] = [];
+      const cards = Array.from(document.querySelectorAll('.accordion-item'));
 
-        for (const row of rows) {
-          const label = norm(row.querySelector('label')?.textContent || '');
-          const value = norm(row.querySelector('span')?.textContent || '');
-          if (!label || !value) continue;
-
-          rawPairs.push({ label, value });
-
-          const k = label.replace(/\s+/g, '');
-          if (k === 'วันปิดสมุดทะเบียน') details.bookCloseDateText = value;
-          else if (k === 'วันกำหนดรายชื่อผู้ถือหุ้น') details.recordDateText = value;
-          else if (k.startsWith('วันจ่าย')) details.paymentDateText = value;
-          else if (k === 'ประเภท') details.benefitTypeText = value;
-          else if (k.includes('บาท/หุ้น')) details.dividendPerShareText = value;
-          else if (k.includes('รอบผล')) details.periodText = value;
-          else if (k.includes('เงินปันผลจาก')) details.dividendFromText = value;
-        }
-
-        return { details, rawPairs };
-      };
-
-      const results: RightBenefitItemDto[] = [];
-
-      for (const card of document.querySelectorAll('.accordion-item')) {
-        const btn = card.querySelector<HTMLButtonElement>('button.accordion-button');
+      for (const card of cards) {
+        // =========================
+        // HEADER
+        // =========================
+        const btn = card.querySelector('button.accordion-button') as HTMLElement | null;
         if (!btn) continue;
 
         const headerText = norm(btn.innerText);
-        const header = parseHeader(headerText);
-        if (!header.sign) continue;
 
+        const signMatch = headerText.match(/\b(XD|XR|XW|XB|XM)\b/);
+        if (!signMatch) continue;
+
+        const sign = signMatch[1];
+
+        const dateMatch = headerText.match(/(\d{1,2}\s*[ก-ฮ]\S*\s*25\d{2})/);
+        const amountMatch = headerText.match(/(\d+(?:\.\d+)?)\s*บาท/);
+
+        // =========================
+        // DETAILS
+        // =========================
         const body = card.querySelector('.accordion-body');
         if (!body) continue;
 
         const rows = Array.from(body.querySelectorAll('.d-flex.mb-2'));
-        const { details, rawPairs } = mapDetails(rows);
+
+        const rawPairs: any[] = [];
+        const details: any = {};
+
+        for (const row of rows) {
+          const labelEl = row.querySelector('label');
+          const valueEl = row.querySelector('span');
+
+          if (!labelEl || !valueEl) continue;
+
+          const label = norm(labelEl.textContent || '');
+          const value = norm(valueEl.textContent || '');
+
+          rawPairs.push({ label, value });
+
+          const k = label.replace(/\s+/g, '');
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          if (k === 'วันปิดสมุดทะเบียน') details.bookCloseDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k === 'วันกำหนดรายชื่อผู้ถือหุ้น') details.recordDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k.startsWith('วันจ่าย')) details.paymentDateText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k === 'ประเภท') details.benefitTypeText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k.includes('บาท/หุ้น')) details.dividendPerShareText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k.includes('รอบผล')) details.periodText = value;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+          else if (k.includes('เงินปันผลจาก')) details.dividendFromText = value;
+        }
 
         results.push({
-          eventDateText: header.date,
-          sign: header.sign as any,
+          eventDateText: dateMatch?.[1] ?? '',
+          sign,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access
           benefitTypeText: details.benefitTypeText ?? '',
-          amountText: header.amount ? `${header.amount} บาท` : '',
-          amountValue: header.amount ? Number(header.amount) : null,
+          amountText: amountMatch ? `${amountMatch[1]} บาท` : '',
+          amountValue: amountMatch ? Number(amountMatch[1]) : null,
           currency: 'THB',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           details,
           rawPairs,
         });
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return results;
     });
   }
