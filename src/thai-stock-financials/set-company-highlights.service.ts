@@ -149,7 +149,9 @@ export class SetCompanyHighlightsService implements OnModuleDestroy {
 
           values.forEach((val, i) => {
             const metric = { label, value: val };
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
             if (section === 'accounts') periods[i].financialAccounts.push(metric);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
             else periods[i].financialRatios.push(metric);
           });
         });
@@ -182,6 +184,7 @@ export class SetCompanyHighlightsService implements OnModuleDestroy {
             Array.from(tr.querySelectorAll('td'))
               .slice(1)
               .forEach((td, i) => {
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
                 tradingPeriods[i].financialStatementAsOf = norm(td.textContent || '');
               });
             return;
@@ -192,6 +195,7 @@ export class SetCompanyHighlightsService implements OnModuleDestroy {
             .map((td) => toNum(td.textContent || ''));
 
           values.forEach((val, i) => {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
             tradingPeriods[i].metrics.push({ label, value: val });
           });
         });
